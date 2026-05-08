@@ -160,6 +160,10 @@ export default function HomePage() {
           throw new Error("USER_API_KEY_INVALID");
         }
 
+        if (errorPayload?.code === "SERVER_API_KEY_INVALID") {
+          throw new Error("SERVER_API_KEY_INVALID");
+        }
+
         throw new Error("REQUEST_FAILED");
       }
 
@@ -185,6 +189,9 @@ export default function HomePage() {
       } else if (err instanceof Error && err.message === "USER_API_KEY_INVALID") {
         setNeedsUserApiKey(true);
         setError("That Claude API key looks invalid. Please check it and try again.");
+      } else if (err instanceof Error && err.message === "SERVER_API_KEY_INVALID") {
+        setNeedsUserApiKey(true);
+        setError("Server Claude key is invalid. Add your own Claude API key to continue.");
       } else {
         setError("Something went wrong. Please try again.");
       }
@@ -371,26 +378,26 @@ export default function HomePage() {
               </p>
             ) : null}
 
-            {needsUserApiKey ? (
-              <label className="block space-y-2">
-                <span className="text-sm font-medium text-[#f4f4f6]">
-                  Claude API key (required after server limit)
-                </span>
-                <input
-                  type="password"
-                  value={form.userApiKey}
-                  disabled={isLoading}
-                  onChange={(event) =>
-                    setForm((prev) => ({ ...prev, userApiKey: event.target.value }))
-                  }
-                  placeholder="sk-ant-..."
-                  className="h-11 w-full rounded-md border border-[#242728] bg-[#101111] px-3 text-[#f4f4f6] placeholder:text-[#6a6b6c] transition focus:border-[rgba(255,255,255,0.16)] focus:outline-none focus:ring-2 focus:ring-[#ffffff]/20 disabled:cursor-not-allowed disabled:opacity-70"
-                />
-                <span className="block text-xs leading-5 text-[#9c9c9d]">
-                  The server limit was reached. Add your key to continue.
-                </span>
-              </label>
-            ) : null}
+            <label className="block space-y-2">
+              <span className="text-sm font-medium text-[#f4f4f6]">
+                Claude API key {needsUserApiKey ? "(required right now)" : "(optional)"}
+              </span>
+              <input
+                type="password"
+                value={form.userApiKey}
+                disabled={isLoading}
+                onChange={(event) =>
+                  setForm((prev) => ({ ...prev, userApiKey: event.target.value }))
+                }
+                placeholder="sk-ant-..."
+                className="h-11 w-full rounded-md border border-[#242728] bg-[#101111] px-3 text-[#f4f4f6] placeholder:text-[#6a6b6c] transition focus:border-[rgba(255,255,255,0.16)] focus:outline-none focus:ring-2 focus:ring-[#ffffff]/20 disabled:cursor-not-allowed disabled:opacity-70"
+              />
+              <span className="block text-xs leading-5 text-[#9c9c9d]">
+                {needsUserApiKey
+                  ? "Server key is unavailable right now, so your key is required."
+                  : "Leave blank to use the server key."}
+              </span>
+            </label>
 
             <label className="block space-y-2">
               <span className="text-sm font-medium text-[#f4f4f6]">

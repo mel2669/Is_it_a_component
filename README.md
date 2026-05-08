@@ -42,16 +42,19 @@ Visit [http://localhost:3000](http://localhost:3000).
 - The page contains a landing section and the triage tool in one scrollable view.
 - The form sends five required answers to `POST /api/triage`.
 - The form supports an optional user-provided Claude API key; if provided, that request uses the user key.
-- If no user key is provided, the API route uses `ANTHROPIC_API_KEY` with a daily server budget of 100 tokens.
+- If no user key is provided, the API route uses `ANTHROPIC_API_KEY` with a daily server budget (default: 12,000 tokens; configurable by env var).
 - The API route sends answers to Anthropic (`claude-sonnet-4-5`) with a strict system prompt.
 - The route parses the model output as JSON and validates its shape before returning to the client.
 - If model output is malformed or the request fails, the client shows: `Something went wrong. Please try again.`
 
 ### Daily token budget details
 
-- The 100-token server budget is tracked in memory and resets daily (UTC).
+- The server budget (default `12000`) is tracked in memory and resets daily (UTC).
 - This budget only applies to requests using the server API key.
 - User-provided keys are not budget-limited by the app.
+- Optional tuning env vars:
+  - `DAILY_SERVER_TOKEN_LIMIT` (default `12000`)
+  - `SERVER_MAX_OUTPUT_TOKENS` (default `450`)
 
 ## Deploy to Vercel
 

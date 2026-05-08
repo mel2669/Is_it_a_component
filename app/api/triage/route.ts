@@ -144,11 +144,14 @@ function extractTextContent(response: Anthropic.Messages.Message): string {
 }
 
 export async function POST(request: Request) {
+  let usedUserKey = false;
+
   try {
     const body = (await request.json()) as Partial<RequestBody>;
     const providedApiKey = body.userApiKey?.trim();
     const serverApiKey = process.env.ANTHROPIC_API_KEY;
     const usingUserKey = Boolean(providedApiKey);
+    usedUserKey = usingUserKey;
     const apiKey = providedApiKey || serverApiKey;
 
     const { job, closestComponents, differences, frequency, driver } = body;
@@ -265,8 +268,10 @@ export async function POST(request: Request) {
       if (error.status === 401) {
         return NextResponse.json(
           {
-            error: "Provided Claude API key is invalid.",
-            code: "USER_API_KEY_INVALID"
+            error: usedUserKey
+              ? "Provided Claude API key is invalid."
+              : "Server Claude API key is invalid.",
+            code: usedUserKey ? "USER_API_KEY_INVALID" : "SERVER_API_KEY_INVALID"
           },
           { status: 401 }
         );
