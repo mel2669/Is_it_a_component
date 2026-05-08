@@ -26,7 +26,7 @@ type TriageResult = {
   next_step: string;
 };
 
-const TIP_URL = "https://example.com/tip";
+const TIP_URL = "https://ko-fi.com/melvinhogan";
 const DRAFT_STORAGE_KEY = "ds-triage-draft";
 
 const initialForm: TriageForm = {
@@ -216,7 +216,7 @@ export default function HomePage() {
               />
             </div>
             <h1 className="text-balance text-4xl font-semibold leading-[1.1] tracking-tight text-[#f4f4f6] sm:text-5xl lg:text-6xl">
-              Should this be a new component, or a variant?
+              Is it component?
             </h1>
             <p className="max-w-[60ch] text-base leading-7 text-[#cdcdcd] sm:text-lg">
               A focused tool for the most common design system intake question.
