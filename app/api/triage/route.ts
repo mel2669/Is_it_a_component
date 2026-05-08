@@ -68,7 +68,24 @@ type TriageResponse = {
   next_step: string;
 };
 
-const DAILY_SERVER_TOKEN_LIMIT = 100;
+const DEFAULT_DAILY_SERVER_TOKEN_LIMIT = 12000;
+const DEFAULT_SERVER_MAX_OUTPUT_TOKENS = 450;
+const SERVER_BUDGET_BUFFER_TOKENS = 800;
+const USER_MAX_OUTPUT_TOKENS = 1024;
+
+function parsePositiveInt(value: string | undefined, fallback: number): number {
+  const parsed = Number.parseInt(value ?? "", 10);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+}
+
+const DAILY_SERVER_TOKEN_LIMIT = parsePositiveInt(
+  process.env.DAILY_SERVER_TOKEN_LIMIT,
+  DEFAULT_DAILY_SERVER_TOKEN_LIMIT
+);
+const SERVER_MAX_OUTPUT_TOKENS = parsePositiveInt(
+  process.env.SERVER_MAX_OUTPUT_TOKENS,
+  DEFAULT_SERVER_MAX_OUTPUT_TOKENS
+);
 
 type ServerBudgetState = {
   date: string;
@@ -116,6 +133,14 @@ function tryParseTriageResponse(rawText: string): TriageResponse | null {
   }
 
   return null;
+}
+
+function extractTextContent(response: Anthropic.Messages.Message): string {
+  return response.content
+    .filter((item) => item.type === "text")
+    .map((item) => item.text)
+    .join("\n")
+    .trim();
 }
 
 export async function POST(request: Request) {
@@ -168,10 +193,23 @@ export async function POST(request: Request) {
     }
 
     const remainingServerTokens = DAILY_SERVER_TOKEN_LIMIT - serverBudget.usedTokens;
+    if (!usingUserKey && remainingServerTokens < SERVER_BUDGET_BUFFER_TOKENS) {
+      return NextResponse.json(
+        {
+          error: "Daily server token limit reached. Add your own Claude API key.",
+          code: "DAILY_SERVER_TOKEN_LIMIT_REACHED"
+        },
+        { status: 429 }
+      );
+    }
+
     const anthropic = new Anthropic({ apiKey });
     const response = await anthropic.messages.create({
       model: "claude-sonnet-4-5",
-      max_tokens: usingUserKey ? 1024 : Math.max(1, Math.min(1024, remainingServerTokens)),
+      max_tokens: usingUserKey
+        ? USER_MAX_OUTPUT_TOKENS
+        : Math.min(SERVER_MAX_OUTPUT_TOKENS, remainingServerTokens),
+      temperature: 0,
       system: SYSTEM_PROMPT,
       messages: [{ role: "user", content: userMessage }]
     });
@@ -182,13 +220,35 @@ export async function POST(request: Request) {
       serverBudget.usedTokens += inputTokens + outputTokens;
     }
 
-    const textContent = response.content
-      .filter((item) => item.type === "text")
-      .map((item) => item.text)
-      .join("\n")
-      .trim();
+    const textContent = extractTextContent(response);
 
-    const parsed = tryParseTriageResponse(textContent);
+    let parsed = tryParseTriageResponse(textContent);
+    if (!parsed) {
+      const repairResponse = await anthropic.messages.create({
+        model: "claude-sonnet-4-5",
+        max_tokens: usingUserKey
+          ? USER_MAX_OUTPUT_TOKENS
+          : Math.min(SERVER_MAX_OUTPUT_TOKENS, remainingServerTokens),
+        temperature: 0,
+        system:
+          "Convert the input into valid JSON only. Output exactly one JSON object with keys verdict, reasoning, next_step.",
+        messages: [
+          {
+            role: "user",
+            content: `Return this as strict JSON only:\n${textContent}`
+          }
+        ]
+      });
+
+      if (!usingUserKey) {
+        const repairInputTokens = repairResponse.usage?.input_tokens ?? 0;
+        const repairOutputTokens = repairResponse.usage?.output_tokens ?? 0;
+        serverBudget.usedTokens += repairInputTokens + repairOutputTokens;
+      }
+
+      parsed = tryParseTriageResponse(extractTextContent(repairResponse));
+    }
+
     if (!parsed) {
       return NextResponse.json(
         {
@@ -200,7 +260,19 @@ export async function POST(request: Request) {
     }
 
     return NextResponse.json(parsed);
-  } catch (error) {
+  } catch (error: unknown) {
+    if (error instanceof Anthropic.APIError) {
+      if (error.status === 401) {
+        return NextResponse.json(
+          {
+            error: "Provided Claude API key is invalid.",
+            code: "USER_API_KEY_INVALID"
+          },
+          { status: 401 }
+        );
+      }
+    }
+
     console.error("Triage API error:", error);
     return NextResponse.json(
       {

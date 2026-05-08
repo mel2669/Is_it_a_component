@@ -156,6 +156,10 @@ export default function HomePage() {
           throw new Error("CLAUDE_REQUEST_FAILED");
         }
 
+        if (errorPayload?.code === "USER_API_KEY_INVALID") {
+          throw new Error("USER_API_KEY_INVALID");
+        }
+
         throw new Error("REQUEST_FAILED");
       }
 
@@ -178,6 +182,9 @@ export default function HomePage() {
         (err.message === "NON_CLAUDE_RESPONSE" || err.message === "CLAUDE_REQUEST_FAILED")
       ) {
         setError("We couldn't get a Claude-generated answer. Please try again.");
+      } else if (err instanceof Error && err.message === "USER_API_KEY_INVALID") {
+        setNeedsUserApiKey(true);
+        setError("That Claude API key looks invalid. Please check it and try again.");
       } else {
         setError("Something went wrong. Please try again.");
       }
