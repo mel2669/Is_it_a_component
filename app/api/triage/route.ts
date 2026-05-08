@@ -118,55 +118,6 @@ function tryParseTriageResponse(rawText: string): TriageResponse | null {
   return null;
 }
 
-function runLocalTriage({
-  closestComponents,
-  differences,
-  frequency,
-  driver
-}: Pick<RequestBody, "closestComponents" | "differences" | "frequency" | "driver">): TriageResponse {
-  const frequencyText = frequency.toLowerCase();
-  const differencesText = differences.toLowerCase();
-  const driverText = driver.toLowerCase();
-  const closest = closestComponents.trim() || "an existing component";
-
-  const hasStrongNewSignals =
-    frequencyText.includes("everywhere") ||
-    driverText.includes("accessibility") ||
-    differencesText.includes("semantic") ||
-    differencesText.includes("behavior") ||
-    differencesText.includes("keyboard") ||
-    differencesText.includes("screen reader") ||
-    differencesText.includes("workflow") ||
-    differencesText.includes("intent");
-
-  const hasVariantSignals =
-    frequencyText.includes("one place") ||
-    frequencyText.includes("few") ||
-    driverText.includes("designer preference") ||
-    differencesText.includes("visual") ||
-    differencesText.includes("style") ||
-    differencesText.includes("color") ||
-    differencesText.includes("size") ||
-    differencesText.includes("spacing");
-
-  if (hasStrongNewSignals && !hasVariantSignals) {
-    return {
-      verdict: "NEW_COMPONENT",
-      reasoning:
-        "This reads like a distinct job with meaningful behavioral or semantic differences, not a styling tweak. Given the expected usage and constraints, forcing this into an existing API is likely to create overloaded props and fragile logic.",
-      next_step:
-        "Draft a minimal API and accessibility contract for this as a separate component, then validate it against two real product use cases before implementation."
-    };
-  }
-
-  return {
-    verdict: "VARIANT",
-    reasoning: `The request is closer to ${closest} than to a net-new pattern, and the differences sound mostly presentational or scope-limited. That is usually better handled as a variant so the system stays simpler and avoids component sprawl.`,
-    next_step:
-      "Propose a variant spec on the closest existing component (props, states, and examples) and review it with your DS maintainers."
-  };
-}
-
 export async function POST(request: Request) {
   try {
     const body = (await request.json()) as Partial<RequestBody>;
@@ -189,7 +140,11 @@ export async function POST(request: Request) {
 
     if (!apiKey) {
       return NextResponse.json(
-        runLocalTriage({ closestComponents, differences, frequency, driver })
+        {
+          error: "No API key available. Add your own key or configure server key.",
+          code: "MISSING_API_KEY"
+        },
+        { status: 503 }
       );
     }
 
@@ -236,13 +191,23 @@ export async function POST(request: Request) {
     const parsed = tryParseTriageResponse(textContent);
     if (!parsed) {
       return NextResponse.json(
-        runLocalTriage({ closestComponents, differences, frequency, driver })
+        {
+          error: "Claude returned an invalid response format.",
+          code: "NON_CLAUDE_RESPONSE"
+        },
+        { status: 502 }
       );
     }
 
     return NextResponse.json(parsed);
   } catch (error) {
     console.error("Triage API error:", error);
-    return NextResponse.json({ error: "Failed to complete triage" }, { status: 500 });
+    return NextResponse.json(
+      {
+        error: "Unable to get a response from Claude right now.",
+        code: "CLAUDE_REQUEST_FAILED"
+      },
+      { status: 502 }
+    );
   }
 }

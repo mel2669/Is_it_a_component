@@ -1,5 +1,11 @@
 import type { Metadata } from "next";
+import { Inter } from "next/font/google";
 import "./globals.css";
+
+const inter = Inter({
+  subsets: ["latin"],
+  display: "swap"
+});
 
 export const metadata: Metadata = {
   title: "Variant or New Component",
@@ -13,7 +19,9 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en">
-      <body className="bg-white text-zinc-900 antialiased">{children}</body>
+      <body className={`${inter.className} bg-[#07080a] text-[#f4f4f6] antialiased`}>
+        {children}
+      </body>
     </html>
   );
 }
