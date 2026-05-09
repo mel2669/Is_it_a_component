@@ -176,15 +176,21 @@ function readAnthropicKeyFromEnvLocal(): string | undefined {
   return undefined;
 }
 
+/**
+ * Vercel (and `next start`) set `NODE_ENV=production`. Server secrets must come
+ * only from the host environment (e.g. Vercel project env) — `.env.local` is not
+ * deployed. Local dev prefers `.env.local` so shell exports do not override the file.
+ */
 function resolveServerAnthropicApiKey(): string | undefined {
-  const fromFile = readAnthropicKeyFromEnvLocal();
-  const fromProcess = process.env.ANTHROPIC_API_KEY;
-  const chosen =
-    process.env.NODE_ENV === "development"
-      ? (fromFile ?? fromProcess)
-      : (fromProcess ?? fromFile);
-  return chosen?.trim() || undefined;
+  const fromProcess = process.env.ANTHROPIC_API_KEY?.trim();
+  if (process.env.NODE_ENV !== "development") {
+    return fromProcess || undefined;
+  }
+  return readAnthropicKeyFromEnvLocal() || fromProcess || undefined;
 }
+
+/** Node.js only — ensures server env + filesystem helpers; never Edge. */
+export const runtime = "nodejs";
 
 export async function POST(request: Request) {
   let usedUserKey = false;
