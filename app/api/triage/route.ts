@@ -1,4 +1,6 @@
 import Anthropic from "@anthropic-ai/sdk";
+import { readFileSync } from "fs";
+import { join } from "path";
 import { NextResponse } from "next/server";
 
 const SYSTEM_PROMPT = `You are a senior design system practitioner helping a designer
@@ -143,13 +145,54 @@ function extractTextContent(response: Anthropic.Messages.Message): string {
     .trim();
 }
 
+/**
+ * Next.js does not override process.env keys that were already set (e.g. from
+ * ~/.zshrc). In development, prefer .env.local so the file you edit is what runs.
+ */
+function readAnthropicKeyFromEnvLocal(): string | undefined {
+  if (process.env.NODE_ENV !== "development") return undefined;
+  try {
+    const envPath = join(process.cwd(), ".env.local");
+    const raw = readFileSync(envPath, "utf8");
+    for (const line of raw.split("\n")) {
+      const trimmed = line.trim();
+      if (!trimmed || trimmed.startsWith("#")) continue;
+      const eq = trimmed.indexOf("=");
+      if (eq === -1) continue;
+      const key = trimmed.slice(0, eq).trim();
+      if (key !== "ANTHROPIC_API_KEY") continue;
+      let val = trimmed.slice(eq + 1).trim();
+      if (
+        (val.startsWith('"') && val.endsWith('"')) ||
+        (val.startsWith("'") && val.endsWith("'"))
+      ) {
+        val = val.slice(1, -1);
+      }
+      return val || undefined;
+    }
+  } catch {
+    return undefined;
+  }
+  return undefined;
+}
+
+function resolveServerAnthropicApiKey(): string | undefined {
+  const fromFile = readAnthropicKeyFromEnvLocal();
+  const fromProcess = process.env.ANTHROPIC_API_KEY;
+  const chosen =
+    process.env.NODE_ENV === "development"
+      ? (fromFile ?? fromProcess)
+      : (fromProcess ?? fromFile);
+  return chosen?.trim() || undefined;
+}
+
 export async function POST(request: Request) {
   let usedUserKey = false;
 
   try {
     const body = (await request.json()) as Partial<RequestBody>;
     const providedApiKey = body.userApiKey?.trim();
-    const serverApiKey = process.env.ANTHROPIC_API_KEY;
+    const serverApiKey = resolveServerAnthropicApiKey();
     const usingUserKey = Boolean(providedApiKey);
     usedUserKey = usingUserKey;
     const apiKey = providedApiKey || serverApiKey;

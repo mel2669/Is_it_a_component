@@ -132,7 +132,7 @@ export default function HomePage() {
         headers: {
           "Content-Type": "application/json"
         },
-        body: JSON.stringify(form)
+        body: JSON.stringify({ ...form, userApiKey: form.userApiKey.trim() })
       });
 
       if (!response.ok) {
@@ -188,10 +188,14 @@ export default function HomePage() {
         setError("We couldn't get a Claude-generated answer. Please try again.");
       } else if (err instanceof Error && err.message === "USER_API_KEY_INVALID") {
         setNeedsUserApiKey(true);
-        setError("That Claude API key looks invalid. Please check it and try again.");
+        setError(
+          "Anthropic rejected the key in this box. Use a fresh API key from console.anthropic.com—or clear the box to use ANTHROPIC_API_KEY from .env.local instead."
+        );
       } else if (err instanceof Error && err.message === "SERVER_API_KEY_INVALID") {
         setNeedsUserApiKey(true);
-        setError("Server Claude key is invalid. Add your own Claude API key to continue.");
+        setError(
+          "Anthropic rejected ANTHROPIC_API_KEY from .env.local. Create a new key at console.anthropic.com and replace the value, then restart npm run dev—or paste a working key above."
+        );
       } else {
         setError("Something went wrong. Please try again.");
       }
@@ -395,7 +399,7 @@ export default function HomePage() {
               <span className="block text-xs leading-5 text-[#9c9c9d]">
                 {needsUserApiKey
                   ? "Server key is unavailable right now, so your key is required."
-                  : "Leave blank to use the server key."}
+                  : "Leave blank to use ANTHROPIC_API_KEY from .env.local locally (or hosting env). Anything you type here replaces that key."}
               </span>
             </label>
 
