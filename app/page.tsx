@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, useEffect, useMemo, useState } from "react";
+import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import Image from "next/image";
 
 type Frequency = "One place" | "A few places" | "Everywhere";
@@ -11,10 +11,72 @@ type Driver =
   | "Brand requirement"
   | "Unclear";
 
+const CLOSEST_OTHER_ID = "__other__";
+const MAX_CLOSEST_SELECTIONS = 5;
+
+const CLOSEST_COMPONENT_OPTIONS = [
+  { id: "button", label: "Button / icon button" },
+  { id: "input", label: "Input / text field" },
+  { id: "textarea", label: "Textarea" },
+  { id: "select", label: "Select / dropdown / combobox" },
+  { id: "selection", label: "Checkbox / radio / switch / toggle" },
+  { id: "card", label: "Card" },
+  { id: "modal", label: "Modal / dialog" },
+  { id: "drawer", label: "Drawer / sheet / side panel" },
+  { id: "popover", label: "Popover / tooltip / menu surface" },
+  { id: "tabs", label: "Tabs / segmented control" },
+  { id: "accordion", label: "Accordion / disclosure" },
+  { id: "list", label: "List / list item / row" },
+  { id: "table", label: "Table / data grid" },
+  { id: "badge", label: "Badge / chip / tag" },
+  { id: "avatar", label: "Avatar / thumbnail" },
+  { id: "alert", label: "Alert / banner / inline message / toast" },
+  { id: "nav", label: "Navigation / menu / breadcrumb" },
+  { id: "datepicker", label: "Date or time picker" },
+  { id: "feedback", label: "Loading / progress / skeleton" },
+  { id: "divider", label: "Divider / separator" },
+  { id: CLOSEST_OTHER_ID, label: "Other" }
+] as const;
+
+type ClosestComponentId = (typeof CLOSEST_COMPONENT_OPTIONS)[number]["id"];
+
+const CLOSEST_ID_SET = new Set<string>(CLOSEST_COMPONENT_OPTIONS.map((o) => o.id));
+
+const CLOSEST_LABEL_BY_ID: Record<ClosestComponentId, string> =
+  CLOSEST_COMPONENT_OPTIONS.reduce(
+    (acc, o) => {
+      acc[o.id] = o.label;
+      return acc;
+    },
+    {} as Record<ClosestComponentId, string>
+  );
+
+function formatClosestComponentsForApi(
+  selections: ClosestComponentId[],
+  otherText: string
+): string {
+  const core = selections.filter((id) => id !== CLOSEST_OTHER_ID);
+  const parts = core.map((id) => CLOSEST_LABEL_BY_ID[id]);
+  if (selections.includes(CLOSEST_OTHER_ID)) {
+    const detail = otherText.trim();
+    parts.push(detail ? `Other (${detail})` : "Other");
+  }
+  return parts.join("; ");
+}
+
+function closestChipLabel(id: ClosestComponentId, otherText: string): string {
+  if (id === CLOSEST_OTHER_ID) {
+    const t = otherText.trim();
+    return t ? `Other: ${t.length > 36 ? `${t.slice(0, 36)}…` : t}` : "Other";
+  }
+  return CLOSEST_LABEL_BY_ID[id];
+}
+
 type TriageForm = {
   userApiKey: string;
   job: string;
-  closestComponents: string;
+  closestSelections: ClosestComponentId[];
+  closestOtherText: string;
   differences: string;
   frequency: Frequency | "";
   driver: Driver | "";
@@ -32,7 +94,8 @@ const DRAFT_STORAGE_KEY = "ds-triage-draft";
 const initialForm: TriageForm = {
   userApiKey: "",
   job: "",
-  closestComponents: "",
+  closestSelections: [],
+  closestOtherText: "",
   differences: "",
   frequency: "",
   driver: ""
@@ -40,6 +103,8 @@ const initialForm: TriageForm = {
 
 export default function HomePage() {
   const [form, setForm] = useState<TriageForm>(initialForm);
+  const [closestOpen, setClosestOpen] = useState(false);
+  const closestDropdownRef = useRef<HTMLDivElement>(null);
   const [tipChoice, setTipChoice] = useState<"tipped" | "skipped" | null>(null);
   const [result, setResult] = useState<TriageResult | null>(null);
   const [isLoading, setIsLoading] = useState(false);
@@ -47,21 +112,47 @@ export default function HomePage() {
   const [needsUserApiKey, setNeedsUserApiKey] = useState(false);
 
   useEffect(() => {
+    function handlePointerDown(event: PointerEvent) {
+      if (!closestOpen) return;
+      const node = closestDropdownRef.current;
+      if (node && !node.contains(event.target as Node)) {
+        setClosestOpen(false);
+      }
+    }
+    document.addEventListener("pointerdown", handlePointerDown);
+    return () => document.removeEventListener("pointerdown", handlePointerDown);
+  }, [closestOpen]);
+
+  useEffect(() => {
     try {
       const rawDraft = window.localStorage.getItem(DRAFT_STORAGE_KEY);
       if (!rawDraft) return;
 
       const draft = JSON.parse(rawDraft) as Partial<
-        Pick<TriageForm, "job" | "closestComponents" | "differences" | "frequency" | "driver">
+        Pick<
+          TriageForm,
+          | "job"
+          | "closestSelections"
+          | "closestOtherText"
+          | "differences"
+          | "frequency"
+          | "driver"
+        >
       >;
 
       setForm((prev) => ({
         ...prev,
         job: typeof draft.job === "string" ? draft.job : prev.job,
-        closestComponents:
-          typeof draft.closestComponents === "string"
-            ? draft.closestComponents
-            : prev.closestComponents,
+        closestSelections: Array.isArray(draft.closestSelections)
+          ? draft.closestSelections.filter(
+              (id): id is ClosestComponentId =>
+                typeof id === "string" && CLOSEST_ID_SET.has(id)
+            )
+          : prev.closestSelections,
+        closestOtherText:
+          typeof draft.closestOtherText === "string"
+            ? draft.closestOtherText
+            : prev.closestOtherText,
         differences:
           typeof draft.differences === "string" ? draft.differences : prev.differences,
         frequency:
@@ -91,7 +182,8 @@ export default function HomePage() {
           DRAFT_STORAGE_KEY,
           JSON.stringify({
             job: form.job,
-            closestComponents: form.closestComponents,
+            closestSelections: form.closestSelections,
+            closestOtherText: form.closestOtherText,
             differences: form.differences,
             frequency: form.frequency,
             driver: form.driver
@@ -107,17 +199,45 @@ export default function HomePage() {
     setTipChoice(choice);
   };
 
+  const closestFieldValid = useMemo(() => {
+    const count = form.closestSelections.length;
+    const inRange = count >= 1 && count <= MAX_CLOSEST_SELECTIONS;
+    const needsOtherDetail = form.closestSelections.includes(CLOSEST_OTHER_ID);
+    const otherOk = !needsOtherDetail || Boolean(form.closestOtherText.trim());
+    return inRange && otherOk;
+  }, [form.closestOtherText, form.closestSelections]);
+
   const isFormValid = useMemo(
     () =>
       Boolean(
         form.job.trim() &&
-          form.closestComponents.trim() &&
+          closestFieldValid &&
           form.differences.trim() &&
           form.frequency &&
           form.driver
       ),
-    [form]
+    [closestFieldValid, form]
   );
+
+  const toggleClosestSelection = (id: ClosestComponentId) => {
+    setForm((prev) => {
+      const has = prev.closestSelections.includes(id);
+      if (has) {
+        return {
+          ...prev,
+          closestSelections: prev.closestSelections.filter((x) => x !== id),
+          ...(id === CLOSEST_OTHER_ID ? { closestOtherText: "" } : {})
+        };
+      }
+      if (prev.closestSelections.length >= MAX_CLOSEST_SELECTIONS) {
+        return prev;
+      }
+      return {
+        ...prev,
+        closestSelections: [...prev.closestSelections, id]
+      };
+    });
+  };
 
   const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -127,12 +247,24 @@ export default function HomePage() {
     setIsLoading(true);
 
     try {
+      const closestComponents = formatClosestComponentsForApi(
+        form.closestSelections,
+        form.closestOtherText
+      );
+
       const response = await fetch("/api/triage", {
         method: "POST",
         headers: {
           "Content-Type": "application/json"
         },
-        body: JSON.stringify({ ...form, userApiKey: form.userApiKey.trim() })
+        body: JSON.stringify({
+          job: form.job,
+          closestComponents,
+          differences: form.differences,
+          frequency: form.frequency,
+          driver: form.driver,
+          userApiKey: form.userApiKey.trim()
+        })
       });
 
       if (!response.ok) {
@@ -180,6 +312,7 @@ export default function HomePage() {
         setNeedsUserApiKey(true);
         setError("Server token budget is used up today. Add your own Claude API key.");
       } else if (err instanceof Error && err.message === "NO_API_KEY_AVAILABLE") {
+        setNeedsUserApiKey(true);
         setError("Add your Claude API key to continue.");
       } else if (
         err instanceof Error &&
@@ -382,26 +515,29 @@ export default function HomePage() {
               </p>
             ) : null}
 
-            <label className="block space-y-2">
-              <span className="text-sm font-medium text-[#f4f4f6]">
-                Claude API key {needsUserApiKey ? "(required right now)" : "(optional)"}
-              </span>
-              <input
-                type="password"
-                value={form.userApiKey}
-                disabled={isLoading}
-                onChange={(event) =>
-                  setForm((prev) => ({ ...prev, userApiKey: event.target.value }))
-                }
-                placeholder="sk-ant-..."
-                className="h-11 w-full rounded-md border border-[#242728] bg-[#101111] px-3 text-[#f4f4f6] placeholder:text-[#6a6b6c] transition focus:border-[rgba(255,255,255,0.16)] focus:outline-none focus:ring-2 focus:ring-[#ffffff]/20 disabled:cursor-not-allowed disabled:opacity-70"
-              />
-              <span className="block text-xs leading-5 text-[#9c9c9d]">
-                {needsUserApiKey
-                  ? "Server key is unavailable right now, so your key is required."
-                  : "Leave blank to use ANTHROPIC_API_KEY from .env.local locally (or hosting env). Anything you type here replaces that key."}
-              </span>
-            </label>
+            {needsUserApiKey ? (
+              <label className="block space-y-2">
+                <span className="text-sm font-medium text-[#f4f4f6]">
+                  Claude API key
+                </span>
+                <input
+                  type="password"
+                  value={form.userApiKey}
+                  disabled={isLoading}
+                  autoComplete="off"
+                  onChange={(event) =>
+                    setForm((prev) => ({ ...prev, userApiKey: event.target.value }))
+                  }
+                  placeholder="sk-ant-..."
+                  className="h-11 w-full rounded-md border border-[#242728] bg-[#101111] px-3 text-[#f4f4f6] placeholder:text-[#6a6b6c] transition focus:border-[rgba(255,255,255,0.16)] focus:outline-none focus:ring-2 focus:ring-[#ffffff]/20 disabled:cursor-not-allowed disabled:opacity-70"
+                />
+                <span className="block text-xs leading-5 text-[#9c9c9d]">
+                  The server key isn&apos;t available or was rejected. Paste your key from
+                  console.anthropic.com — it is only sent to this app&apos;s API route, not
+                  stored.
+                </span>
+              </label>
+            ) : null}
 
             <label className="block space-y-2">
               <span className="text-sm font-medium text-[#f4f4f6]">
@@ -420,25 +556,140 @@ export default function HomePage() {
               />
             </label>
 
-            <label className="block space-y-2">
-              <span className="text-sm font-medium text-[#f4f4f6]">
-                What existing components in your system are closest?
+            <div ref={closestDropdownRef} className="relative space-y-2">
+              <span className="block text-sm font-medium text-[#f4f4f6]">
+                Which existing components is this request most like?
               </span>
-              <input
-                required
-                type="text"
-                value={form.closestComponents}
+              <p className="text-xs leading-5 text-[#9c9c9d]">
+                Pick up to {MAX_CLOSEST_SELECTIONS} from common design system patterns. Add
+                detail if you choose Other.
+              </p>
+
+              {form.closestSelections.length > 0 ? (
+                <ul className="flex flex-wrap gap-2" aria-label="Selected components">
+                  {form.closestSelections.map((id) => {
+                    const label = closestChipLabel(id, form.closestOtherText);
+                    return (
+                      <li key={id}>
+                        <span className="inline-flex max-w-full items-center gap-1 rounded-full border border-[#2e3031] bg-[#161717] py-1 pl-2.5 pr-1 text-xs text-[#e8e8e8] sm:text-sm">
+                          <span className="min-w-0 truncate" title={label}>
+                            {label}
+                          </span>
+                          <button
+                            type="button"
+                            disabled={isLoading}
+                            onClick={() => toggleClosestSelection(id)}
+                            aria-label={`Remove ${CLOSEST_LABEL_BY_ID[id]}`}
+                            className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-[#9c9c9d] transition hover:bg-[#242728] hover:text-[#f4f4f6] focus:outline-none focus:ring-2 focus:ring-[#ffffff]/25 disabled:cursor-not-allowed disabled:opacity-50"
+                          >
+                            <svg
+                              viewBox="0 0 24 24"
+                              aria-hidden="true"
+                              className="h-3.5 w-3.5"
+                              fill="none"
+                              stroke="currentColor"
+                              strokeWidth="2"
+                              strokeLinecap="round"
+                            >
+                              <path d="M18 6 6 18M6 6l12 12" />
+                            </svg>
+                          </button>
+                        </span>
+                      </li>
+                    );
+                  })}
+                </ul>
+              ) : null}
+
+              <button
+                type="button"
                 disabled={isLoading}
-                onChange={(event) =>
-                  setForm((prev) => ({
-                    ...prev,
-                    closestComponents: event.target.value
-                  }))
-                }
-                placeholder="List 1-3 components, or write &apos;not sure&apos;"
-                className="h-11 w-full rounded-md border border-[#242728] bg-[#101111] px-3 text-[#f4f4f6] placeholder:text-[#6a6b6c] transition focus:border-[rgba(255,255,255,0.16)] focus:outline-none focus:ring-2 focus:ring-[#ffffff]/20 disabled:cursor-not-allowed disabled:opacity-70"
-              />
-            </label>
+                id="closest-components-trigger"
+                aria-haspopup="listbox"
+                aria-expanded={closestOpen}
+                aria-controls="closest-components-listbox"
+                onClick={() => setClosestOpen((o) => !o)}
+                className="flex h-11 w-full items-center justify-between gap-2 rounded-md border border-[#242728] bg-[#101111] px-3 text-left text-[#f4f4f6] transition focus:border-[rgba(255,255,255,0.16)] focus:outline-none focus:ring-2 focus:ring-[#ffffff]/20 disabled:cursor-not-allowed disabled:opacity-70"
+              >
+                <span
+                  className={
+                    form.closestSelections.length === 0 ? "text-[#6a6b6c]" : "text-[#cdcdcd]"
+                  }
+                >
+                  {form.closestSelections.length === 0
+                    ? "Choose components…"
+                    : "Add or change…"}
+                </span>
+                <svg
+                  viewBox="0 0 24 24"
+                  aria-hidden="true"
+                  className={`h-4 w-4 shrink-0 text-[#9c9c9d] transition ${closestOpen ? "rotate-180" : ""}`}
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="1.8"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                >
+                  <path d="m6 9 6 6 6-6" />
+                </svg>
+              </button>
+
+              {closestOpen ? (
+                <ul
+                  id="closest-components-listbox"
+                  role="listbox"
+                  aria-multiselectable="true"
+                  aria-labelledby="closest-components-trigger"
+                  className="absolute z-20 mt-1 max-h-64 w-full overflow-auto rounded-md border border-[#242728] bg-[#101111] py-2 shadow-lg"
+                >
+                  {CLOSEST_COMPONENT_OPTIONS.map((opt) => {
+                    const checked = form.closestSelections.includes(opt.id);
+                    const atCap =
+                      form.closestSelections.length >= MAX_CLOSEST_SELECTIONS && !checked;
+                    return (
+                      <li key={opt.id} role="option" aria-selected={checked}>
+                        <label
+                          className={`flex cursor-pointer items-center gap-2 px-3 py-2 text-sm text-[#cdcdcd] hover:bg-[#1a1a1a] ${
+                            atCap ? "cursor-not-allowed opacity-50 hover:bg-transparent" : ""
+                          }`}
+                        >
+                          <input
+                            type="checkbox"
+                            checked={checked}
+                            disabled={isLoading || atCap}
+                            onChange={() => toggleClosestSelection(opt.id)}
+                            className="h-4 w-4 shrink-0 rounded border-[#242728] bg-[#101111] text-[#ffffff] focus:ring-[#ffffff]/30"
+                          />
+                          <span>{opt.label}</span>
+                        </label>
+                      </li>
+                    );
+                  })}
+                </ul>
+              ) : null}
+
+              {form.closestSelections.includes(CLOSEST_OTHER_ID) ? (
+                <label className="block space-y-2 pt-1">
+                  <span className="text-sm font-medium text-[#f4f4f6]">
+                    Describe &quot;Other&quot;
+                  </span>
+                  <input
+                    type="text"
+                    value={form.closestOtherText}
+                    disabled={isLoading}
+                    onChange={(event) =>
+                      setForm((prev) => ({ ...prev, closestOtherText: event.target.value }))
+                    }
+                    placeholder="e.g. File upload dropzone, rich text toolbar…"
+                    className="h-11 w-full rounded-md border border-[#242728] bg-[#101111] px-3 text-[#f4f4f6] placeholder:text-[#6a6b6c] transition focus:border-[rgba(255,255,255,0.16)] focus:outline-none focus:ring-2 focus:ring-[#ffffff]/20 disabled:cursor-not-allowed disabled:opacity-70"
+                  />
+                </label>
+              ) : null}
+
+              {form.closestSelections.length >= MAX_CLOSEST_SELECTIONS ? (
+                <p className="text-xs text-[#9c9c9d]">Maximum {MAX_CLOSEST_SELECTIONS} selections.</p>
+              ) : null}
+            </div>
 
             <label className="block space-y-2">
               <span className="text-sm font-medium text-[#f4f4f6]">
